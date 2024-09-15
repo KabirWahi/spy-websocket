@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Game Client</title>
+</head>
+<body>
+    <h1>WebSocket Game Client</h1>
+    <div>
+        <label for="partyCode">Party Code:</label>
+        <input type="text" id="partyCode" maxlength="4">
+        <button onclick="connect()">Connect</button>
+    </div>
+    <div id="status"></div>
+    <div>
+        <input type="text" id="message" placeholder="Type a message">
+        <button onclick="sendMessage()">Send</button>
+    </div>
+    <div id="messages"></div>
+
+    <script>
+        let socket;
+        const statusDiv = document.getElementById('status');
+        const messagesDiv = document.getElementById('messages');
+
+        function connect() {
+            const partyCode = document.getElementById('partyCode').value.toUpperCase();
+            const url = `ws://localhost:3000${partyCode ? `?partyCode=${partyCode}` : ''}`;
+            
+            socket = new WebSocket(url);
+
+            socket.onopen = function(e) {
+                statusDiv.innerHTML = 'Connected to server';
+            };
+
+            socket.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.type === 'connected') {
+                    statusDiv.innerHTML = `Connected to party: ${data.partyCode}, Players: ${data.playerCount}`;
+                } else if (data.type === 'error') {
+                    statusDiv.innerHTML = `Error: ${data.message}`;
+                } else {
+                    messagesDiv.innerHTML += `<p>${JSON.stringify(data)}</p>`;
+                }
+            };
+
+            socket.onclose = function(event) {
+                statusDiv.innerHTML = 'Disconnected from server';
+            };
+
+            socket.onerror = function(error) {
+                statusDiv.innerHTML = `Error: ${error.message}`;
+            };
+        }
+
+        function sendMessage() {
+            const messageInput = document.getElementById('message');
+            const message = messageInput.value;
+            if (message && socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify({ type: 'chat', message: message }));
+                messageInput.value = '';
+            }
+        }
+    </script>
+</body>
+</html>
