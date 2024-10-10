@@ -30,6 +30,17 @@ function broadcastToParty(partyCode, message) {
   }
 }
 
+function assignNewHost(partyCode) {
+  const party = parties.get(partyCode);
+  if (party && party.length > 0) {
+    party[0].isHost = true;
+    broadcastToParty(partyCode, { 
+      type: 'newHost', 
+      hostName: party[0].name 
+    });
+  }
+}
+
 wss.on('connection', (ws, req) => {
   const parameters = url.parse(req.url, true).query;
   let partyCode = parameters.partyCode;
@@ -42,14 +53,12 @@ wss.on('connection', (ws, req) => {
   }
 
   if (partyCode) {
-    // If a party code is provided, check if it exists
     if (!parties.has(partyCode)) {
       ws.send(JSON.stringify({ type: 'error', message: 'Party not found' }));
       ws.close();
       return;
     }
 
-    // Check for duplicate names in the existing party
     const party = parties.get(partyCode);
     if (party.some(player => player.name.toLowerCase() === playerName.toLowerCase())) {
       ws.send(JSON.stringify({ type: 'error', message: 'A player with this name already exists in the lobby' }));
@@ -57,7 +66,6 @@ wss.on('connection', (ws, req) => {
       return;
     }
   } else {
-    // If no party code is provided, generate a new unique one
     partyCode = generateUniquePartyCode();
     parties.set(partyCode, []);
   }
@@ -70,40 +78,64 @@ wss.on('connection', (ws, req) => {
     return;
   }
 
-  const playerInfo = { ws, name: playerName };
+  const playerInfo = { ws, name: playerName, isHost: party.length === 0 };
   party.push(playerInfo);
 
   console.log(`Player ${playerName} joined lobby ${partyCode}. Total players: ${party.length}`);
 
-  // Send updated player list to all clients in the party
-  const playerList = party.map(p => p.name);
+  const playerList = party.map(p => ({ name: p.name, isHost: p.isHost }));
   broadcastToParty(partyCode, { 
     type: 'playerList', 
     players: playerList,
-    partyCode: partyCode
+    partyCode: partyCode,
+    selectedDeck: party.selectedDeck,
+    selectedMode: party.selectedMode
   });
 
   ws.on('message', (message) => {
     const data = JSON.parse(message);
-    broadcastToParty(partyCode, data);
+    
+    if ((data.type === 'updateDeck' || data.type === 'updateMode') && playerInfo.isHost) {
+      if (data.type === 'updateDeck') {
+        party.selectedDeck = data.deck;
+      } else if (data.type === 'updateMode') {
+        party.selectedMode = data.mode;
+      }
+      broadcastToParty(partyCode, { 
+        type: 'playerList', 
+        players: party.map(p => ({ name: p.name, isHost: p.isHost })),
+        partyCode: partyCode,
+        selectedDeck: party.selectedDeck,
+        selectedMode: party.selectedMode
+      });
+    } else {
+      broadcastToParty(partyCode, data);
+    }
   });
 
   ws.on('close', () => {
     const index = party.findIndex(p => p.ws === ws);
     if (index !== -1) {
+      const wasHost = party[index].isHost;
       party.splice(index, 1);
-    }
-    console.log(`Player ${playerName} left lobby ${partyCode}. Remaining players: ${party.length}`);
-    if (party.length === 0) {
-      parties.delete(partyCode);
-      console.log(`Lobby ${partyCode} has been closed`);
-    } else {
-      const updatedPlayerList = party.map(p => p.name);
-      broadcastToParty(partyCode, { 
-        type: 'playerList', 
-        players: updatedPlayerList,
-        partyCode: partyCode
-      });
+      console.log(`Player ${playerName} left lobby ${partyCode}. Remaining players: ${party.length}`);
+      
+      if (party.length === 0) {
+        parties.delete(partyCode);
+        console.log(`Lobby ${partyCode} has been closed`);
+      } else {
+        if (wasHost) {
+          assignNewHost(partyCode);
+        }
+        const updatedPlayerList = party.map(p => ({ name: p.name, isHost: p.isHost }));
+        broadcastToParty(partyCode, { 
+          type: 'playerList', 
+          players: updatedPlayerList,
+          partyCode: partyCode,
+          selectedDeck: party.selectedDeck,
+          selectedMode: party.selectedMode
+        });
+      }
     }
   });
 });
